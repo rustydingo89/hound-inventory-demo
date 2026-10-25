@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1014">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Inventory Hound">
+<title>DEMO · RDA Inventory Hound</title>
+<script src="./data.js"></script><script src="./demo-api.js"></script><script>/* theme before first paint: dark unless owner picked light */(function(){try{var t=localStorage.theme==='light'?'light':'dark';document.documentElement.setAttribute('data-theme',t);if(t==='light'){document.querySelector('meta[name="theme-color"]').content='#f4f5f7';var s=document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');if(s)s.content='default';}}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();</script>
+<link rel="icon" href="./brand/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="./favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" href="./demo.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/" title="RDA Inventory Hound"><img class="wm wm-dark" src="./brand/wordmark.svg" alt="RDA Inventory Hound" width="166" height="40"><img class="wm wm-light" src="./brand/wordmark-light.svg" alt="" aria-hidden="true" width="166" height="40"></a>
+  <span class="demo-badge" title="Demo with fake data">DEMO</span><div class="searchwrap">
+    <svg viewBox="0 0 24 24" class="sicon"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12z"/></svg>
+    <input id="q" type="search" placeholder="Search name, UPC, SKU…  e.g. 30 cal can" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    <kbd>/</kbd>
+  </div>
+  <button id="custview" class="pill" type="button" title="Hide wholesale cost, net and floor (safe to show a customer)">Customer view</button>
+  <button id="themebtn" class="pill" type="button" title="Switch light / dark theme"><span class="ti" aria-hidden="true">☀</span> <span class="tl">Light</span></button>
+  <button id="menubtn" class="iconbtn" type="button" aria-label="Menu" aria-expanded="false">☰</button>
+</header>
+<div id="menu" class="menu" hidden>
+  <button type="button" id="m-cust" class="mitem"><span>Customer view</span><span class="switch sm"><input type="checkbox" id="m-custcb" tabindex="-1"><span></span></span></button>
+  <button type="button" id="m-theme" class="mitem"><span>Light theme</span><span class="switch sm"><input type="checkbox" id="m-themecb" tabindex="-1"><span></span></span></button>
+  <a class="mitem" href="#/">Dashboard</a><a class="mitem" href="#/search">Search</a><a class="mitem" href="#/changes">Changes</a>
+  <a class="mitem" href="#/lists">Favorites &amp; Lists</a><a class="mitem" href="#/backorders">Backorders</a><a class="mitem" href="#/deals">Deals</a><a class="mitem" href="#/orders">Orders (dry run)</a>
+  <a class="mitem" href="#/watch">Watchlist</a><a class="mitem" href="#/quote">Quote calc</a><a class="mitem" href="#/feeds">Feeds</a><a class="mitem" href="#/suppliers">Suppliers</a><a class="mitem" href="#/settings">Settings</a>
+  <div class="mitem muted small" id="m-built"></div>
+</div>
+<nav class="tabs" id="tabs">
+  <a href="#/" data-v="home">Dashboard</a>
+  <a href="#/search" data-v="search">Search</a>
+  <a href="#/changes" data-v="changes">Changes</a>
+  <a href="#/lists" data-v="lists">Favorites &amp; Lists</a>
+  <a href="#/backorders" data-v="backorders">Backorders</a>
+  <a href="#/deals" data-v="deals">Deals</a>
+  <a href="#/orders" data-v="orders">Orders</a>
+  <a href="#/watch" data-v="watch">Watchlist</a>
+  <a href="#/quote" data-v="quote">Quote calc</a>
+  <a href="#/feeds" data-v="feeds">Feeds</a>
+  <a href="#/suppliers" data-v="suppliers">Suppliers</a>
+  <a href="#/settings" data-v="settings">Settings</a>
+  <span class="grow"></span><span id="built" class="muted small"></span>
+</nav>
+<nav class="btabs" id="btabs">
+  <a href="#/" data-v="home"><i>⌂</i>Home</a><a href="#/search" data-v="search"><i>⌕</i>Search</a>
+  <a href="#/lists" data-v="lists"><i>★</i>Lists</a><a href="#/deals" data-v="deals"><i>$</i>Deals</a>
+  <a href="#" id="b-more"><i>☰</i>More</a>
+</nav>
+
+<section id="v-search" class="view">
+  <div class="filters">
+    <select id="f-by" title="Search by"><option value="all">Search: All</option><option value="upc">UPC</option><option value="sku">SKU / item #</option><option value="mpn">MFG P/N</option></select>
+    <select id="f-cat"><option value="">All categories</option></select>
+    <select id="f-cal"><option value="">Any caliber</option></select>
+    <select id="f-bc" hidden><option value="">Any bore class</option></select>
+    <label class="tog" id="t-also" hidden title="Also show cans rated for this bore, not just built for it"><input type="checkbox" id="f-also"><span>Also rated for</span></label>
+    <select id="f-act" hidden><option value="">Any action</option></select>
+    <div class="combo" id="brandbox"><input id="f-brandq" placeholder="Brand" autocomplete="off" spellcheck="false"><button type="button" class="cx" id="brandx" hidden aria-label="Clear brand">✕</button><div class="clist" id="brandlist" hidden></div></div>
+    <select id="f-thread"><option value="">Any thread</option></select>
+    <select id="f-dist"><option value="">Any distributor</option></select>
+    <div class="range"><input id="f-pmin" inputmode="decimal" placeholder="Min $"><span>–</span><input id="f-pmax" inputmode="decimal" placeholder="Max $"></div>
+    <input id="f-cmax" class="cost" inputmode="decimal" placeholder="Max landed $">
+    <label class="tog"><input type="checkbox" id="f-junk"><span>Parts/used</span></label>
+    <select id="f-sort">
+      <option value="rank">Best match</option><option value="price">Price ↑</option><option value="price:desc">Price ↓</option>
+      <option value="landed" class="cost">Landed ↑</option><option value="net:desc" class="cost">Net ↓</option>
+      <option value="qty:desc">Qty ↓</option><option value="srcs:desc">Most sources</option><option value="brand">Brand A–Z</option>
+    </select>
+    <button id="f-clear" class="ghost">Clear</button>
+    <button id="f-more" class="ghost mobonly" type="button" aria-expanded="false">More filters</button>
+  </div>
+  <div class="gbar">
+    <label class="fbox">Filter: <input id="f-kw" placeholder="+word to require, -word to exclude" autocomplete="off" spellcheck="false"></label>
+    <span class="rcount" id="rcount">Results: —</span>
+    <button type="button" class="pill sm on" id="p-stock" aria-pressed="true">In stock</button><input type="checkbox" id="f-stock" checked hidden>
+    <label class="tog sm"><input type="checkbox" id="f-img"><span>Show Images</span></label>
+    <span class="grow"></span>
+    <label class="fbox">Global UPC: <input id="f-gupc" inputmode="numeric" placeholder="scan or type" autocomplete="off"></label>
+    <div class="combo"><button type="button" class="ghost sm" id="colbtn">Columns ▾</button><div class="clist cols" id="colmenu" hidden></div></div>
+  </div>
+  <div id="summary" class="summary"></div>
+  <div id="tilebar" class="tilebar" hidden></div>
+  <div class="tablewrap gridwrap" id="gridwrap">
+    <table id="results" class="grid dense"><colgroup></colgroup><thead><tr></tr></thead><tbody></tbody></table>
+  </div>
+  <div id="cards" class="pcards"></div>
+</section>
+
+<section id="v-lists" class="view">
+  <div class="filters"><b class="sh">Favorites &amp; Quick Lists</b><span class="grow"></span>
+    <input id="l-new" placeholder="New list name" maxlength="60"><button id="l-create" class="pill on">＋ New list</button></div>
+  <div class="ltabs" id="l-tabs"></div>
+  <div class="filters" id="l-actions"></div>
+  <div class="tablewrap"><table class="grid dense mcards" id="l-table"><thead><tr><th data-m="t">Title</th><th data-m="x">MFG</th><th data-m="x">MFG P/N</th><th class="r">Qty</th><th class="r cost">Landed</th><th class="r" data-m="x">MAP</th><th class="r">Sell</th><th data-ml="Best">Best source</th><th data-m="x">Added</th><th data-m="a"></th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section id="v-backorders" class="view">
+  <p class="muted small">Items on your Watchlist, Favorites or Quick Lists that are out of stock at every distributor. They show up here until a feed has them again.</p>
+  <div class="tablewrap"><table class="grid dense mcards" id="b-table"><thead><tr><th data-m="t">Title</th><th>From</th><th>Out since</th><th class="r">MAP</th><th data-ml="Last best">Last best source</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section id="v-deals" class="view">
+  <div class="filters">
+    <div class="seg" id="d-kind"><button data-k="drop" class="on cost">Cost drops</button><button data-k="margin" class="cost">Best margin at MAP</button></div>
+    <select id="d-cat"><option value="">Guns, cans &amp; NFA</option></select>
+    <select id="d-days"><option value="3">3 days</option><option value="7">7 days</option><option value="14" selected>14 days</option><option value="30">30 days</option></select>
+    <select id="d-by" hidden><option value="">Most $ net at MAP</option><option value="pct">Highest % margin</option></select>
+  </div>
+  <div id="d-summary" class="summary"></div>
+  <div class="tablewrap"><table class="grid dense mcards" id="d-table"><thead></thead><tbody></tbody></table></div>
+</section>
+
+<section id="v-home" class="view">
+  <div class="cards" id="statcards"></div>
+  <div class="two">
+    <div class="panel"><h3>Feeds <a href="#/feeds" class="small">details →</a></h3><div id="home-feeds"></div></div>
+    <div class="panel"><h3>Watchlist <a href="#/watch" class="small">all →</a></h3><div id="home-watch"></div></div>
+  </div>
+  <div class="panel"><h3>Recent changes — guns &amp; cans <a href="#/changes" class="small">all →</a></h3><div id="home-changes"></div></div>
+</section>
+
+<section id="v-changes" class="view">
+  <div class="cx-top">
+    <div class="seg cx-tabs" id="cx-tab" role="tablist" aria-label="Change type">
+      <button type="button" data-t="sold" class="on"><span class="lb">Sold out</span><b class="n">·</b></button>
+      <button type="button" data-t="back"><span class="lb"><span class="lg">Back in stock</span><span class="sh">Back</span></span><b class="n">·</b></button>
+      <button type="button" data-t="new"><span class="lb">New</span><b class="n">·</b></button>
+      <button type="button" data-t="price" class="cost"><span class="lb"><span class="lg">Price changes</span><span class="sh">Price</span></span><b class="n">·</b></button>
+    </div>
+    <div class="seg cx-win" id="cx-win" aria-label="Time window">
+      <button type="button" data-w="last" class="on" title="Changes from each distributor's most recent feed update">Since last sync</button><button type="button" data-w="24h">24h</button><button type="button" data-w="7d">7 days</button>
+    </div>
+  </div>
+  <div class="cx-fbar">
+    <button type="button" class="ghost cx-fbtn" id="cx-fbtn" aria-expanded="false" aria-controls="cx-fp">Filters<b class="n" id="cx-fn" hidden></b></button>
+    <div class="cx-chips" id="cx-chips"></div>
+  </div>
+  <div class="cx-fp" id="cx-fp">
+    <label class="fl"><span>Type</span><select id="cx-type"><option value="">All types</option></select></label>
+    <label class="fl"><span>Caliber / bore</span><select id="cx-cal"><option value="">Any caliber</option></select></label>
+    <label class="fl"><span>…or type a caliber</span><input id="cx-calq" type="search" placeholder="30 cal, 338 lapua, 6.5 cm" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label>
+    <label class="fl"><span>Distributor</span><select id="cx-dist"><option value="">All distributors</option></select></label>
+    <label class="fl wide"><span>Keyword</span><input id="cx-kw" type="search" placeholder="+word to require, -word to exclude" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></label>
+    <div class="fl fx"><span>&nbsp;</span><div class="cx-fact"><label class="tog"><input type="checkbox" id="cx-junk"><span>Parts/used</span></label><button type="button" class="ghost" id="cx-clear">Clear</button><button type="button" class="ghost" id="cx-link" title="Copy a bookmarkable link to this exact view">Copy link</button></div></div>
+  </div>
+  <div id="cx-summary" class="summary"></div>
+  <div class="cxlist" id="cx-list"></div>
+  <p id="cx-note" class="small muted cx-note"></p>
+</section>
+
+<section id="v-watch" class="view">
+  <p class="muted">Star any product from its detail page. Items light up here when they're in stock (and at or under your target landed cost, if you set one).</p>
+  <div class="tablewrap"><table class="grid mcards" id="w-table"><thead><tr><th data-m="t">Product</th><th class="r">Qty</th><th class="r cost">Landed</th><th class="r cost">Target</th><th class="r">Sell</th><th data-m="f">Note / recent</th><th data-m="a"></th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section id="v-quote" class="view">
+  <div class="panel quote">
+    <h3>Quote calculator</h3>
+    <p class="muted small">Card fee <span class="feetxt"></span>. Floor = lowest price that still nets $<span class="minnet"></span>. Pre-filled prices never go under MAP; a typed price under MAP shows an amber Below MAP warning.</p>
+    <div class="qgrid">
+      <label>Landed cost<input id="qc-landed" inputmode="decimal" placeholder="0.00"></label>
+      <label>Customer price<input id="qc-price" inputmode="decimal" placeholder="0.00"></label>
+      <label>…or target net<input id="qc-net" inputmode="decimal" placeholder="e.g. 100"></label>
+      <label>MAP (optional)<input id="qc-map" inputmode="decimal" placeholder="0.00"></label>
+    </div>
+    <div id="qc-out" class="qout"></div>
+  </div>
+</section>
+
+<section id="v-feeds" class="view">
+  <div id="feeds-head" class="summary"></div>
+  <div class="tablewrap"><table class="grid mcards" id="f-table"><thead><tr><th data-m="t">Distributor</th><th data-m="f">Status</th><th>Last pull</th><th>Next pull</th><th class="r">Rows</th><th>Mode</th></tr></thead><tbody></tbody></table></div>
+  <div class="panel"><h3>Catalog</h3><div id="catstats"></div></div>
+</section>
+
+<section id="v-orders" class="view"><div id="ordersroot"></div></section>
+
+<section id="v-settings" class="view"><div id="settingsroot"></div></section>
+
+<section id="v-suppliers" class="view">
+  <div class="filters"><b class="sh">Suppliers</b><span class="grow"></span>
+    <a class="pill on" href="#/settings/new" style="display:inline-flex;align-items:center">＋ Add supplier</a><button id="s-reload" class="ghost">Refresh</button></div>
+  <div class="panel stnote">Connections, logins, schedules, shipping terms and new suppliers are now managed in <a href="#/settings">☰ › Settings</a>. This page keeps the summary, search-tile display and sort order.</div>
+  <div id="s-wiz" class="panel wiz" hidden></div>
+  <div class="ltabs" id="s-tabs"></div>
+  <div class="tablewrap" id="s-sumwrap"><table class="grid dense mcards" id="s-sum"><thead><tr><th data-m="t">Warehouse</th><th>Credential Valid</th><th>Data Feed Status</th><th>Order Status</th><th>Display</th><th>Sort Order</th></tr></thead><tbody></tbody></table></div>
+  <p class="muted small" id="s-sumnote">Display and Sort Order control the distributor tiles under a selected search row. Ordering is not connected: nothing in this app places orders.</p>
+  <div id="s-list" class="sgrid"></div>
+  <div class="two">
+    <div class="panel"><h3>Where logins are stored</h3><div id="s-keychain" class="muted small"></div></div>
+    <div class="panel"><h3>Still needs custom code</h3><ul id="s-needs" class="muted small tight"></ul></div>
+  </div>
+</section>
+
+<div id="drawer" class="drawer" hidden>
+  <div class="dback"></div>
+  <aside class="dpanel" role="dialog" aria-modal="true" aria-label="Product"><div class="dbar"><button class="dbk" type="button" aria-label="Back to results">‹ Back</button><span class="dtitle"></span><button class="dclose" type="button" aria-label="Close">✕</button></div><div id="dbody"></div></aside>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script src="./app.js"></script>
+<script src="./orders.js"></script>
+<script src="./settings.js"></script>
+<div class="demo-foot">Demo data – not real inventory · Inventory Hound demo 1.2.0</div>
+</body>
+</html>

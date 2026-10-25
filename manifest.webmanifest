@@ -1,0 +1,30 @@
+{
+ "name": "Inventory Hound (Demo)",
+ "short_name": "Hound Demo",
+ "description": "Inventory Hound demo with fake data",
+ "start_url": "./index.html",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#0d1014",
+ "theme_color": "#0d1014",
+ "icons": [
+  {
+   "src": "./brand/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any"
+  },
+  {
+   "src": "./brand/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any"
+  },
+  {
+   "src": "./brand/icon-maskable-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ]
+}
