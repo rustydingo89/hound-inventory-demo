@@ -1,7 +1,7 @@
 'use strict';
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const money = (v, d = 2) => v == null || v === '' ? '—' : '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits: d, maximumFractionDigits: d});
+const money = (v, d = 2) => v == null || v === '' ? '—' : (Number(v) < 0 ? '−$' : '$') + Math.abs(Number(v)).toLocaleString('en-US', {minimumFractionDigits: d, maximumFractionDigits: d});
 const m0 = v => money(v, 0);
 const CATN = {suppressor:'Suppressor', handgun:'Handgun', long_gun:'Long gun', nfa:'NFA', accessory:'Accessory', ammo:'Ammo', default:'Other'};
 let LOADED = false, META = {fee:{pct:.0325, fixed:.2, min_net:50}}, ctl = null, timer = null;
@@ -12,6 +12,20 @@ async function api(path, opt) {
 }
 function toast(t) { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(e._t); e._t = setTimeout(() => e.hidden = true, 1800); }
 const netAt = (p, l) => p == null || l == null ? null : +(p - l - (META.fee.pct * p + META.fee.fixed)).toFixed(2);
+// net profit colours (shared by Search cards/rows, detail, tiles and the quote calc): green >= $min_net floor, amber $0-floor, red <= $0
+const netCls = n => n == null ? '' : n >= META.fee.min_net ? 'pos' : n > 0 ? 'warn' : 'neg';
+const SHIPN = {ok: 'ship', est: 'ship (est. terms)', assumed: 'ship (NFA/can assumed $0)', unknown: 'ship unknown'};
+const shipTxt = r => r.ship_st === 'unknown' ? 'ship unknown' : r.ship == null ? '' : r.ship_st === 'assumed' ? 'assumed $0 ship' : r.ship_st === 'est' ? (r.ship ? '~' + money(r.ship) + ' ship' : '~free ship') : (r.ship ? 'incl. ' + money(r.ship) + ' ship' : 'free ship');
+function netTip(r) {
+  if (r.ship_st === 'unknown') return `Net profit not shown: shipping terms for ${r.best_dist || 'this source'} are unknown (add them on its Suppliers page).`;
+  if (r.net_at_sug == null) return r.sug == null ? 'Net profit not shown: no sell price (MAP/MSRP) for this item.' : 'Net profit not shown: no cost from a feed.';
+  const fee = +(META.fee.pct * r.sug + META.fee.fixed).toFixed(2);
+  return `Net profit = Sell ${money(r.sug)} − landed ${money(r.landed)} (cost ${money(r.cost)} + inbound ship ${money(r.ship)} from ${r.best_dist}, 1-unit order`
+    + (r.ship_st === 'est' ? ', terms not confirmed: estimate' : r.ship_st === 'assumed' ? ', NFA/suppressor: assumed $0' : '') + `) − card fee ${money(fee)} (${(META.fee.pct * 100).toFixed(2)}% + ${money(META.fee.fixed)}), same as the Quote calc. Green ≥ $${META.fee.min_net} floor, amber under $${META.fee.min_net}, red ≤ $0.`;
+}
+const netVal = r => (r.net_at_sug != null && r.ship_st === 'est' && r.net_at_sug >= 0 ? '~' : '') + money(r.net_at_sug);
+const netNote = r => (r.ship_st === 'est' ? 'est. · ' : '') + netPct(r);
+const netPct = r => { if (r.net_at_sug == null || !r.sug) return ''; const m = r.net_at_sug / r.sug * 100; return (Math.abs(m) < 10 ? m.toFixed(1) : m.toFixed(0)) + '%'; };
 const priceFor = (l, n) => Math.ceil((l + n + META.fee.fixed) / (1 - META.fee.pct) * 100) / 100;
 function ago(ts) {
   if (!ts) return ''; const t = new Date(ts.replace(' ', 'T')), m = (Date.now() - t) / 60000;
@@ -77,11 +91,11 @@ const COLDEF = [
   {k:'qty', l:'Qty', w:52, s:'qty', a:'r', r: r => `<span class="${r.best_qty < 1 ? 'q0' : r.best_qty <= 2 ? 'qlo' : ''}">${n0(r.total_qty)}</span>`},
   {k:'srcs', l:'Srcs', w:46, s:'srcs', a:'r', r: r => n0(r.n_instock)},
   {k:'cost', l:'Cost', w:84, a:'r', cost:1, r: r => money(r.cost)},
-  {k:'landed', l:'Landed', w:88, s:'landed', a:'r', cost:1, r: r => r.landed != null ? money(r.landed) + (r.best_est ? ' <span class="est" title="Shipping terms for this source are not confirmed: landed is an estimate">Est.</span>' : '') : r.ref ? `<span class="muted" title="ref from ${esc(r.ref.dist)}">${money(r.ref.landed)}</span>` : '—'},
+  {k:'landed', l:'Landed', w:96, s:'landed', a:'r', cost:1, tip: r => r.landed != null ? `cost ${money(r.cost)} + inbound ${SHIPN[r.ship_st] || 'ship'} ${r.ship_st === 'unknown' ? '?' : money(r.ship)} (${r.best_dist}, 1-unit order)` : '', r: r => r.landed != null ? money(r.landed) + (r.best_est ? ' <span class="est" title="Shipping terms for this source are not confirmed: landed is an estimate">Est.</span>' : '') + (r.ship != null || r.ship_st === 'unknown' ? `<small class="shipn">${esc(shipTxt(r))}</small>` : '') : r.ref ? `<span class="muted" title="ref from ${esc(r.ref.dist)}">${money(r.ref.landed)}</span>` : '—'},
   {k:'map', l:'MAP', w:84, s:'map', a:'r', r: r => money(r.map)},
   {k:'msrp', l:'MSRP', w:84, s:'msrp', a:'r', r: r => money(r.msrp)},
   {k:'sell', l:'Sell', w:84, s:'price', a:'r', r: r => `<b>${money(r.sug)}</b>`},
-  {k:'net', l:'Net', w:76, s:'net', a:'r', cost:1, r: r => `<span class="net ${r.net_at_sug == null ? '' : r.net_at_sug >= META.fee.min_net ? 'pos' : 'neg'}">${money(r.net_at_sug)}</span>`},
+  {k:'net', l:'Net profit', w:96, s:'net', a:'r', cost:1, tip: netTip, r: r => `<span class="net ${netCls(r.net_at_sug)}">${netVal(r)}</span>${r.net_at_sug != null ? `<small class="npct">${netNote(r)} after fees</small>` : r.ship_st === 'unknown' ? '<small class="npct">ship unknown</small>' : ''}`},
   {k:'floor', l:'Floor', w:84, s:'floor', a:'r', cost:1, r: r => money(r.floor ?? (r.ref && r.ref.floor))},
 ];
 const DEFCOLS = ['title','mfg','mpn','cal','src','qty','landed','map','sell','net'];
@@ -169,8 +183,9 @@ function cardHTML(r) {
   return `<div class="pcard ${r.instock ? '' : 'oos'}" data-gid="${r.gid}"><div class="pc1">${r.img && $('#f-img').checked ? `<img src="${esc(r.img)}" loading="lazy" referrerpolicy="no-referrer" alt="">` : ''}<div style="min-width:0">
     <span class="pt">${esc(r.stitle)}</span><div class="sub"><span class="pb">${esc(r.bname || r.brand)}</span>${esc([r.mfr_part, calTxt(r), r.action ? ACTL[r.action] : ''].filter(Boolean).join(' · '))}</div>
     ${r.match ? `<div class="sub" style="color:var(--blue)">${esc(r.match.join(' · '))}</div>` : ''}</div></div>
-    <div class="pc2"><div><span>Qty</span><b class="${r.best_qty < 1 ? 'q0' : r.best_qty <= 2 ? 'qlo' : ''}">${n0(r.total_qty)}</b></div><div class="cost"><span>Landed${r.best_est ? ' <span class="est">Est.</span>' : ''}</span><b>${money(r.landed ?? r.ref?.landed)}</b><small class="bsrc">${esc(r.best_dist || '')}</small></div>
-    <div><span>MAP</span><b>${money(r.map)}</b></div><div><span>Sell${r.sug_src ? ' (' + esc(r.sug_src) + ')' : ''}</span><b>${money(r.sug)}</b></div></div></div>`;
+    <div class="pc2"><div><span>Qty</span><b class="${r.best_qty < 1 ? 'q0' : r.best_qty <= 2 ? 'qlo' : ''}">${n0(r.total_qty)}</b></div><div class="cost"><span>Landed${r.best_est ? ' <span class="est">Est.</span>' : ''}</span><b>${money(r.landed ?? r.ref?.landed)}</b><small class="bsrc">${esc(r.best_dist || '')}</small>${r.landed != null ? `<small class="bsrc shipn">${esc(shipTxt(r))}</small>` : ''}</div>
+    <div><span>MAP</span><b>${money(r.map)}</b></div><div><span>Sell${r.sug_src ? ' (' + esc(r.sug_src) + ')' : ''}</span><b>${money(r.sug)}</b></div>
+    <div class="cost pnet" title="${esc(netTip(r))}"><span>Net profit</span><b class="net ${netCls(r.net_at_sug)}">${netVal(r)}</b><small class="npct">${r.net_at_sug != null ? netNote(r) + ' after fees' : r.ship_st === 'unknown' ? 'ship unknown' : ''}</small></div></div></div>`;
 }
 const isPhone = () => matchMedia('(max-width:820px)').matches;
 function renderResults(d) {
@@ -196,7 +211,7 @@ function renderResults(d) {
 function tileHTML(t) {
   const has = t.state === 'stock' || t.state === 'zero';
   return `<div class="tile ${t.state}${t.best ? ' best' : ''}" title="${esc(t.dist)}${t.item_no ? ' · ' + esc(t.item_no) : ''}${t.ship_mode ? ' · ' + esc(t.ship_mode) : ''}${t.state === 'off' ? ' · feed turned off' : t.state === 'none' ? ' · not carried' : ''}${t.best ? ' · best source: lowest landed cost' : ''}${t.est ? ' · landed is an estimate (shipping terms not confirmed)' : ''}">
-     ${t.best ? `<i class="bestb">BEST${t.net != null ? `<span class="cost"> · net ${money(t.net)}</span>` : ''}</i>` : ''}<b>${esc(t.dist)}</b><span>${t.state === 'none' || t.state === 'off' ? '—' : 'Qty ' + n0(t.qty)}</span>${has ? `<span class="cost"> · ${money(t.landed ?? t.cost)}${t.est ? ' <span class="est">Est.</span>' : ''}</span>` : ''}</div>`;
+     ${t.best ? `<i class="bestb">BEST${t.net != null ? `<span class="cost"> · net ${money(t.net)}</span>` : t.ship_unknown ? '<span class="cost"> · ship ?</span>' : ''}</i>` : ''}<b>${esc(t.dist)}</b><span>${t.state === 'none' || t.state === 'off' ? '—' : 'Qty ' + n0(t.qty)}</span>${has ? `<span class="cost"> · ${money(t.landed ?? t.cost)}${t.est ? ' <span class="est">Est.</span>' : ''}</span>` : ''}</div>`;
 }
 /* row select -> distributor tiles; double-click / Enter -> details */
 async function selectRow(gid) {
@@ -381,8 +396,8 @@ async function openProduct(by) {
      <div class="kv">
        <div><span>Sell (${esc(p.sug_src || '—')})</span><b>${m0(p.sug)}</b></div>
        <div><span>MAP / MSRP</span><b>${m0(p.map)} / ${m0(p.msrp)}</b></div>
-       <div class="cost"><span>Best landed</span><b>${money(p.landed)}</b></div>
-       <div class="cost"><span>Net at sell</span><b class="net ${p.net_at_sug >= 50 ? 'pos' : 'neg'}">${money(p.net_at_sug)}</b></div>
+       <div class="cost"><span>Best landed</span><b>${money(p.landed)}</b>${p.landed != null ? `<small class="muted">${esc(p.best_dist || '')} · ${esc(shipTxt(p))}</small>` : ''}</div>
+       <div class="cost" title="${esc(netTip(p))}"><span>Net profit (after card fee)</span><b class="net ${netCls(p.net_at_sug)}">${netVal(p)}</b>${p.net_at_sug != null ? `<small class="muted">${netNote(p)} margin</small>` : p.ship_st === 'unknown' ? '<small class="muted">ship unknown</small>' : ''}</div>
        <div class="cost"><span>Floor ($${META.fee.min_net} net)</span><b>${money(p.floor)}</b></div>
        <div><span>In stock</span><b>${p.total_qty} across ${p.n_instock} of ${p.n_src}</b></div>
      </div>
@@ -431,7 +446,7 @@ const atMap = (P, map) => map && P < map ? +(+map).toFixed(2) : P;
 function quoteBoxes(L, P, map) {
   const fee = P != null ? +(META.fee.pct * P + META.fee.fixed).toFixed(2) : null, n = netAt(P, L);
   const b = [`<div><span>Price</span><b>${money(P)}</b></div>`, `<div class="cost"><span>Card fee</span><b>${money(fee)}</b></div>`,
-    `<div class="cost"><span>Net profit</span><b class="net ${n == null ? '' : n >= META.fee.min_net ? 'pos' : 'neg'}">${money(n)}</b></div>`,
+    `<div class="cost"><span>Net profit</span><b class="net ${netCls(n)}">${money(n)}</b></div>`,
     `<div class="cost"><span>Margin</span><b>${n != null && P ? (n / P * 100).toFixed(1) + '%' : '—'}</b></div>`,
     `<div class="cost"><span>Floor ($${META.fee.min_net} net)</span><b>${L != null ? money(priceFor(L, META.fee.min_net)) : '—'}</b></div>`];
   if (map) b.push(`<div><span>MAP</span><b>${money(map)}</b></div>`, `<div class="${P != null && P < map ? 'belowmap' : ''}"><span>vs MAP</span><b>${P != null ? (P < map ? '⚠ Below MAP' : 'at/above MAP') : '—'}</b></div>`);
