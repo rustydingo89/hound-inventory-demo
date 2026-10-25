@@ -1,7 +1,7 @@
 {
  "name": "Inventory Hound (Demo)",
  "short_name": "Hound Demo",
- "description": "Inventory Hound demo with fake data",
+ "description": "Inventory Hound demo - fictional distributors, stock and cost",
  "start_url": "./index.html",
  "scope": "./",
  "display": "standalone",
