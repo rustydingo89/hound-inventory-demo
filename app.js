@@ -89,7 +89,8 @@ let COLS = (() => { try { const v = JSON.parse(localStorage.cols || 'null'); ret
 if (!localStorage.colsBest && !COLS.includes('src')) { const i = COLS.indexOf('qty'); COLS.splice(i < 0 ? COLS.length : i, 0, 'src'); localStorage.cols = JSON.stringify(COLS); }
 localStorage.colsBest = '1';   // 2026-10-23: show Best source once by default (user can hide it again)
 let COLW = (() => { try { return JSON.parse(localStorage.colw || '{}'); } catch { return {}; } })();
-let LAST = null, RES = [], SEL = null, FAC = null, BK = '', BKNAME = '', GUPC = '';
+let LAST = null, RES = [], SEL = null, FAC = null, BK = '', BKNAME = '', GUPC = '', LASTP = null, MORE = false;
+const pageSize = () => isPhone() ? 50 : 100;
 const colsOn = () => COLDEF.filter(c => COLS.includes(c.k) && (c.k !== 'img' || $('#f-img').checked));
 function params() {
   const p = new URLSearchParams(); const q = $('#q').value.trim(); if (q) p.set('q', q);
@@ -120,10 +121,33 @@ function loadingState() {
 }
 async function doSearch() {
   GUPC = '';
-  const p = params(); sessionStorage.lastq = p.toString(); LOADED = true;
+  const p = params(); sessionStorage.lastq = p.toString(); LOADED = true; MORE = false;
+  p.set('limit', pageSize()); LASTP = p;
   if (ctl) ctl.abort(); ctl = new AbortController(); loadingState();
   let d; try { d = await (await fetch('./api/search?' + p, {signal: ctl.signal})).json(); } catch (e) { if (e.name !== 'AbortError') { $('#gridwrap').classList.remove('busy'); $('#summary').textContent = 'Error: ' + e.message; } return; }
   renderResults(d);
+}
+/* paging: "Show more" button at the end of the list, auto-clicked when it scrolls into view (infinite scroll) */
+async function loadMore() {
+  if (MORE || !LASTP || !LAST || RES.length >= LAST.total) return;
+  MORE = true; const p = new URLSearchParams(LASTP); p.set('offset', RES.length); const want = LAST;
+  $$('.moreb').forEach(b => { b.disabled = true; b.innerHTML = '<span class="spin"></span>Loading…'; });
+  let d; try { d = await (await fetch('./api/search?' + p, {signal: ctl?.signal})).json(); } catch (e) { MORE = false; moreRow(); return; }
+  if (LAST !== want) return;   // a new search started meanwhile
+  MORE = false; RES = RES.concat(d.results || []); LAST.results = RES;
+  if (isPhone()) { $('#cards .moreb')?.remove(); $('#cards').insertAdjacentHTML('beforeend', d.results.map(cardHTML).join('')); }
+  else { $('#results tbody tr.morer')?.remove(); $('#results tbody').insertAdjacentHTML('beforeend', d.results.map(rowHTML).join('')); }
+  countText(); moreRow();
+}
+function countText() { const d = LAST; $('#rcount').textContent = 'Results: ' + n0(d.total) + (d.total > RES.length ? ` (showing ${n0(RES.length)})` : ''); }
+const moreObs = 'IntersectionObserver' in window ? new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) loadMore(); }, {rootMargin: '600px'}) : null;
+function moreRow() {
+  $$('.moreb').forEach(b => { moreObs?.unobserve(b); b.closest('tr.morer') ? b.closest('tr.morer').remove() : b.remove(); });
+  if (!LAST || GUPC || RES.length >= (LAST.total || 0)) return;
+  const left = LAST.total - RES.length, lab = `Show more (${n0(Math.min(left, pageSize()))} of ${n0(left)} left)`;
+  if (isPhone()) $('#cards').insertAdjacentHTML('beforeend', `<button type="button" class="ghost moreb">${lab}</button>`);
+  else $('#results tbody').insertAdjacentHTML('beforeend', `<tr class="morer"><td colspan="${colsOn().length}"><button type="button" class="ghost moreb">${lab}</button></td></tr>`);
+  const b = $('.moreb'); b.onclick = e => { e.stopPropagation(); loadMore(); }; moreObs?.observe(b);
 }
 async function globalUPC(v) {
   v = v.replace(/[^0-9]/g, ''); if (v.length < 6) { toast('UPC needs at least 6 digits'); return; }
@@ -159,13 +183,15 @@ function renderResults(d) {
   }
   RES = d.results;
   const hid = Object.entries(d.hidden || {}).filter(([, v]) => v).map(([k, v]) => `${n0(v)} ${k}`).join(', ');
-  $('#rcount').textContent = 'Results: ' + n0(d.total) + (d.total > d.results.length ? ` (showing ${n0(d.results.length)})` : '');
+  countText();
+  if (d.mode === 'browse') d.parsed = [`Browsing everything${$('#f-stock').checked ? ' in stock' : ''} · type › brand › name · pick a filter or type to narrow`];
   $('#summary').innerHTML = (d.parsed?.length ? esc(d.parsed.join(' · ')) : '') + (d.note?.length ? (d.parsed?.length ? ' · ' : '') + esc(d.note.join('; ')) : '')
     + (hid ? ` · hidden: ${esc(hid)}` : '') + ` · ${d.ms} ms`;
   const none = 'No matches. Try fewer words, turn off “In stock”, clear the Filter box, or tick “Parts/used”.';
   if (isPhone()) { $('#cards').innerHTML = RES.length ? RES.map(cardHTML).join('') : `<div class="empty">${none}</div>`; tb.innerHTML = ''; }
   else { tb.innerHTML = RES.length ? RES.map(rowHTML).join('') : `<tr><td colspan="${ncol}" class="empty" style="white-space:normal">${none}</td></tr>`; $('#cards').innerHTML = ''; }
   if (SEL && !RES.some(r => r.gid == SEL)) { SEL = null; $('#tilebar').hidden = true; }
+  moreRow();
 }
 function tileHTML(t) {
   const has = t.state === 'stock' || t.state === 'zero';
@@ -246,6 +272,7 @@ $('#f-brandq').addEventListener('keydown', e => {
 });
 $('#brandlist').addEventListener('mousedown', e => { const o = e.target.closest('.opt'); if (o) { e.preventDefault(); setBrand(o.dataset.k, o.dataset.n); } });
 $('#brandx').onclick = () => setBrand('', '');
+$('#brandv').onclick = e => { e.stopPropagation(); const h = $('#brandlist').hidden; if (h) brandOpts(); $('#brandlist').hidden = !h; };
 document.addEventListener('click', e => { if (!e.target.closest('#brandbox')) $('#brandlist').hidden = true; if (!e.target.closest('#colmenu,#colbtn')) $('#colmenu').hidden = true; });
 /* facets: brands, actions, bore classes follow category / stock / brand */
 async function loadFacets() {
@@ -639,8 +666,9 @@ async function loadHome() {
   const by = Object.fromEntries(d.stats.map(s => [s.cat, s])), bad = d.feeds.filter(f => f.health === 'amber' || f.health === 'red').length;
   const card = (cat, l) => `<div class="card" data-cat="${cat}"><div class="l">${l}</div><div class="n">${(by[cat]?.clean || 0).toLocaleString()}</div><div class="s">in stock</div></div>`;
   $('#statcards').innerHTML = card('suppressor', 'Suppressors') + card('handgun', 'Handguns') + card('long_gun', 'Long guns') + card('nfa', 'NFA / SBR') + card('ammo', 'Ammo')
+    + `<div class="card" data-cat=""><div class="l">Browse all</div><div class="n">${d.stats.reduce((t, s) => t + (s.clean || 0), 0).toLocaleString()}</div><div class="s">in stock · filter without typing</div></div>`
     + `<div class="card" onclick="location.hash='#/feeds'"><div class="l">Feeds</div><div class="n" style="color:${bad ? 'var(--warn)' : 'var(--good)'}">${d.feeds.length - bad}/${d.feeds.length}</div><div class="s">healthy · index ${esc(d.index_built.slice(11))}${(() => { const nx = d.feeds.filter(f => f.next_run).sort((a, b) => a.next_run < b.next_run ? -1 : 1)[0]; return nx ? ` · next pull ~${esc(nx.next_txt)}` : ''; })()}</div></div>`;
-  $$('#statcards .card[data-cat]').forEach(c => c.onclick = () => { $('#f-cat').value = c.dataset.cat; location.hash = '#/search'; doSearch(); });
+  $$('#statcards .card[data-cat]').forEach(c => c.onclick = () => { $('#f-cat').value = c.dataset.cat; $('#f-bc').value = ''; $('#f-act').value = ''; location.hash = '#/search'; loadFacets().catch(() => {}); doSearch(); });
   $('#home-feeds').innerHTML = feedRows(d);
   loadWatch('#home-watch', true);
   const c = await api('./api/changes?kind=new,back,drop&guns=1&days=7');

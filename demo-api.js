@@ -3,7 +3,13 @@
    No network: nothing here ever contacts a server. Lists, favorites and the watchlist live in this browser (localStorage). */
 (function () {
   'use strict';
-  const D = window.DEMO_DATA; if (!D) return;
+  /* data.js ships the catalog gzip'd + base64 (DEMO_DATA_Z) to stay small; older builds used plain DEMO_DATA */
+  if (!window.DEMO_DATA && !window.DEMO_DATA_Z) return;
+  const unzip = async b64 => { const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    return JSON.parse(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).text()); };
+  const API = (window.DEMO_DATA ? Promise.resolve(window.DEMO_DATA) : unzip(window.DEMO_DATA_Z)).then(d => { window.DEMO_DATA_Z = null; return boot(d); });
+  let A = null; API.then(a => { A = a; }, e => console.warn('demo data failed to load', e));
+  function boot(D) {
   const R = D.rec, NS = 'hound-demo:', OFF = 'Turned off in this demo (no logins, connections, pulls or orders).';
   /* keep the sample history current: move every recorded time forward by (now - build time) */
   const pad = n => String(n).padStart(2, '0');
@@ -71,12 +77,22 @@
   }
   const SORT = {price: r => r.sug, landed: r => r.landed, net: r => r.net_at_sug, qty: r => r.total_qty, srcs: r => r.n_instock, brand: r => (r.bname || r.brand || '').toLowerCase()};
   const strip = r => { const o = Object.assign({}, r); delete o._h; delete o._d; return o; };
+  const CAT_ORDER = {suppressor: 0, handgun: 1, long_gun: 2, nfa: 3, ammo: 4, accessory: 5, default: 6};
+  const FKEYS = ['q', 'kw', 'cat', 'cal', 'thread', 'dist', 'pmin', 'pmax', 'cmax', 'bk', 'brand', 'act', 'bc'];
+  const browseKey = r => [CAT_ORDER[r.cat] ?? 9, (r.bname || r.brand || '').toLowerCase(), (r.title || '').toLowerCase()];
+  let SCACHE = {k: null, rs: null};
   function search(p) {
-    const t0 = performance.now(); let rs = filterRows(p);
-    const s = p.get('sort'), desc = p.get('dir') === 'desc';
+    const t0 = performance.now(), s = p.get('sort'), desc = p.get('dir') === 'desc';
+    const browse = !FKEYS.some(k => (p.get(k) || '').trim());
+    const offset = Math.max(0, parseInt(p.get('offset') || '0', 10) || 0), limit = Math.min(500, Math.max(1, parseInt(p.get('limit') || '200', 10) || 200));
+    const ck = [...p.entries()].filter(([k, v]) => v !== '' && !['offset', 'limit', 'img', '_'].includes(k)).sort().join('&');
+    if (SCACHE.k === ck) { const rs = SCACHE.rs; return {mode: browse ? 'browse' : 'search', results: rs.slice(offset, offset + limit).map(strip), total: rs.length, offset, limit, parsed: {}, hidden: 0, note: '', ms: Math.max(1, Math.round(performance.now() - t0)), built: R['/api/meta'].built}; }
+    let rs = filterRows(p);
     if (s && SORT[s]) { const f = SORT[s]; rs.sort((a, b) => { const x = f(a), y = f(b); if (x == null) return 1; if (y == null) return -1; return (x < y ? -1 : x > y ? 1 : 0) * (desc ? -1 : 1); }); }
+    else if (!p.get('q') && !p.get('cat')) rs.sort((a, b) => { const x = browseKey(a), y = browseKey(b); return x[0] - y[0] || x[1].localeCompare(y[1]) || x[2].localeCompare(y[2]); });
     else { const q = norm(p.get('q') || ''); rs.sort((a, b) => (b.instock - a.instock) || ((norm(b.title).startsWith(q) ? 1 : 0) - (norm(a.title).startsWith(q) ? 1 : 0)) || (b.total_qty || 0) - (a.total_qty || 0)); }
-    return {mode: 'search', results: rs.slice(0, 200).map(strip), total: rs.length, parsed: {}, hidden: 0, note: '', ms: Math.max(1, Math.round(performance.now() - t0)), built: R['/api/meta'].built};
+    SCACHE = {k: ck, rs};
+    return {mode: browse ? 'browse' : 'search', results: rs.slice(offset, offset + limit).map(strip), total: rs.length, offset, limit, parsed: {}, hidden: 0, note: '', ms: Math.max(1, Math.round(performance.now() - t0)), built: R['/api/meta'].built};
   }
   const BCN = {}; (R['/api/meta'].bclasses || []).forEach(b => BCN[b.key] = b.name);
   const ACTN = {}; Object.keys(R).filter(k => k.startsWith('/api/facets')).forEach(k => (R[k].actions || []).forEach(a => ACTN[a.key] = a.name));
@@ -249,27 +265,30 @@
     if (path.startsWith('po/')) return {error: 'Orders are view-only in this demo. The sample order shows the dry-run screen; nothing can be sent.'};
     return {error: OFF};
   }
+    return {route, FILES, listCSV};
+  }
   const realFetch = window.fetch ? window.fetch.bind(window) : null;
   window.fetch = async function (input, opt) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     if (!/(^|\/)api\//.test(url.split('?')[0])) { if (realFetch) return realFetch(input, opt); throw new TypeError('offline demo'); }
+    const api = await API;
     if (opt && opt.signal && opt.signal.aborted) throw new DOMException('Aborted', 'AbortError');
     const method = ((opt && opt.method) || 'GET').toUpperCase(); let body = {};
     if (method !== 'GET' && opt && opt.body != null) {
       if (typeof opt.body === 'string') { try { body = JSON.parse(opt.body); } catch (e) { body = {}; } }
       else if (opt.body.text) { const u = new URL(url, location.href), id = u.searchParams.get('id') || 'sample', t = await opt.body.text();
-        FILES[id] = t.slice(0, 2e6); return new Response(JSON.stringify({ok: true, file: u.searchParams.get('name') || 'upload.csv'}), {status: 200, headers: {'Content-Type': 'application/json'}}); }
+        api.FILES[id] = t.slice(0, 2e6); return new Response(JSON.stringify({ok: true, file: u.searchParams.get('name') || 'upload.csv'}), {status: 200, headers: {'Content-Type': 'application/json'}}); }
     }
-    let r; try { r = route(method, url, body); } catch (e) { console.warn('demo shim', e); r = {error: 'Demo error: ' + e.message}; }
+    let r; try { r = api.route(method, url, body); } catch (e) { console.warn('demo shim', e); r = {error: 'Demo error: ' + e.message}; }
     const [st, obj] = Array.isArray(r) ? r : [200, r];
     await new Promise(res => setTimeout(res, 15));
     return new Response(JSON.stringify(obj), {status: st, headers: {'Content-Type': 'application/json'}});
   };
   /* list CSV export: build the file here instead of downloading from a server */
   document.addEventListener('click', e => {
-    const a = e.target.closest && e.target.closest('a[href*="api/lists/csv"]'); if (!a) return;
+    const a = e.target.closest && e.target.closest('a[href*="api/lists/csv"]'); if (!a || !A) return;
     e.preventDefault(); const name = new URL(a.getAttribute('href'), location.href).searchParams.get('name') || 'Favorites';
-    const blob = new Blob([listCSV(name)], {type: 'text/csv'}), l = document.createElement('a');
+    const blob = new Blob([A.listCSV(name)], {type: 'text/csv'}), l = document.createElement('a');
     l.href = URL.createObjectURL(blob); l.download = name.replace(/[^A-Za-z0-9_-]+/g, '-') + '-demo.csv'; document.body.appendChild(l); l.click();
     setTimeout(() => { URL.revokeObjectURL(l.href); l.remove(); }, 1000);
   }, true);
